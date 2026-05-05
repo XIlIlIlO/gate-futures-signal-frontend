@@ -270,7 +270,7 @@ export default function Chart({ symbol, timeframe }: Props) {
         );
 
         if (res.signals.length > 0) {
-          markersPlugin.setMarkers(signalsToMarkers(res.signals));
+          addSignals(res.signals);
         }
 
         // Show latest candle info by default
@@ -284,9 +284,26 @@ export default function Chart({ symbol, timeframe }: Props) {
       })
       .catch(console.error);
 
-    // Connect WebSocket for real-time updates
-    let currentMarkers: SeriesMarker<Time>[] = [];
+    // Signal marker state — deduplicate by signal ID
+    const signalMap = new Map<string, Signal>();
 
+    function syncMarkers() {
+      const markers = signalsToMarkers(Array.from(signalMap.values()));
+      markersPlugin.setMarkers(markers);
+    }
+
+    function addSignals(signals: Signal[]) {
+      let changed = false;
+      for (const s of signals) {
+        if (!signalMap.has(s.id)) {
+          signalMap.set(s.id, s);
+          changed = true;
+        }
+      }
+      if (changed) syncMarkers();
+    }
+
+    // Connect WebSocket for real-time updates
     const ws = connectCandlesWs(symbol, timeframe, (msg: unknown) => {
       if (disposed) return;
 
@@ -299,8 +316,7 @@ export default function Chart({ symbol, timeframe }: Props) {
 
       if (data.event === "snapshot") {
         if (data.signals && data.signals.length > 0) {
-          currentMarkers = signalsToMarkers(data.signals);
-          markersPlugin.setMarkers(currentMarkers);
+          addSignals(data.signals);
         }
       } else if (data.event === "candle_update" && data.data) {
         const c = data.data;
@@ -321,18 +337,7 @@ export default function Chart({ symbol, timeframe }: Props) {
           color: c.close >= c.open ? "rgba(38,166,154,0.3)" : "rgba(239,83,80,0.3)",
         });
       } else if (data.event === "signal" && data.data) {
-        const sig = data.data as unknown as Signal;
-        const newMarker: SeriesMarker<Time> = {
-          time: toKST(sig.time),
-          position: sig.marker_position,
-          shape: sig.marker_shape === "arrowUp" ? ("arrowUp" as const) : ("arrowDown" as const),
-          color: sig.type === "BUY" ? "#26a69a" : "#ef5350",
-          text: `${sig.type} (${sig.score})`,
-        };
-        currentMarkers = [...currentMarkers, newMarker].sort(
-          (a, b) => (a.time as number) - (b.time as number)
-        );
-        markersPlugin.setMarkers(currentMarkers);
+        addSignals([data.data as unknown as Signal]);
       }
     });
     wsRef.current = ws;

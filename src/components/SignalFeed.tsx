@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Signal, Timeframe } from "../api/types";
+import { fetchRecentSignals } from "../api/rest";
 import { connectSignalsWs, type ManagedWs } from "../api/ws";
-import SignalBadge, { isRealtimeCandle } from "./SignalBadge";
+import SignalBadge, { isRealtimeCandle, isRealtimeOrPrevCandle } from "./SignalBadge";
 import TimeframeSelector from "./TimeframeSelector";
 
 interface Props {
@@ -20,12 +21,15 @@ function enrichSignal(sig: Signal, isLive: boolean): EnrichedSignal {
 const ALL_TF = ["1m", "3m", "5m", "15m", "30m", "1h"];
 const PER_TF_LIMIT = 80;
 
-/** Keep at most 80 signals per timeframe, sorted newest first */
+/** Keep at most 80 signals per timeframe, deduplicated by ID, sorted newest first */
 function capPerTimeframe(signals: EnrichedSignal[]): EnrichedSignal[] {
+  const seen = new Set<string>();
   const buckets: Record<string, EnrichedSignal[]> = {};
   for (const tf of ALL_TF) buckets[tf] = [];
 
   for (const s of signals) {
+    if (seen.has(s.id)) continue;
+    seen.add(s.id);
     const b = buckets[s.timeframe];
     if (b && b.length < PER_TF_LIMIT) b.push(s);
   }
@@ -48,12 +52,10 @@ export default function SignalFeed({ onSignalClick }: Props) {
       if (data.event === "snapshot" && Array.isArray(data.data)) {
         const snapshotSignals = data.data.map((s) => enrichSignal(s, false));
 
-        setSignals((prev) => {
-          const idSet = new Set(prev.map((s) => s.id));
-          const newFromSnapshot = snapshotSignals.filter((s) => !idSet.has(s.id));
-          const merged = [...prev, ...newFromSnapshot];
-          merged.sort((a, b) => b.time - a.time);
-          return capPerTimeframe(merged);
+        // Replace with snapshot (not merge) so deleted signals disappear
+        setSignals(() => {
+          snapshotSignals.sort((a, b) => b.time - a.time);
+          return capPerTimeframe(snapshotSignals);
         });
       } else if (data.event === "signal" && data.data && !Array.isArray(data.data)) {
         const live = enrichSignal(data.data, true);
@@ -71,6 +73,23 @@ export default function SignalFeed({ onSignalClick }: Props) {
     };
   }, []);
 
+  // Periodically sync with backend to remove deleted signals
+  useEffect(() => {
+    const iv = setInterval(() => {
+      Promise.all(
+        ALL_TF.map((tf) => fetchRecentSignals(tf, 400))
+      ).then((results) => {
+        const all: EnrichedSignal[] = [];
+        results.forEach((res) => {
+          res.signals.forEach((s) => all.push(enrichSignal(s, false)));
+        });
+        all.sort((a, b) => b.time - a.time);
+        setSignals(capPerTimeframe(all));
+      }).catch(() => {});
+    }, 30_000);
+    return () => clearInterval(iv);
+  }, []);
+
   // Single shared timer for relative time updates (instead of per-badge)
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -78,8 +97,21 @@ export default function SignalFeed({ onSignalClick }: Props) {
     return () => clearInterval(iv);
   }, []);
 
-  // Only show signals from the latest candle of each timeframe
-  const realtime = signals.filter((s) => isRealtimeCandle(s.time, s.timeframe));
+  // Per-timeframe: if current bucket has signals → show current only
+  // If current bucket is empty → fallback to include previous bucket (no gap on transition)
+  const realtime = (() => {
+    const hasCurrentBucket = new Set<string>();
+    for (const s of signals) {
+      if (isRealtimeCandle(s.time, s.timeframe)) {
+        hasCurrentBucket.add(s.timeframe);
+      }
+    }
+    return signals.filter((s) =>
+      hasCurrentBucket.has(s.timeframe)
+        ? isRealtimeCandle(s.time, s.timeframe)
+        : isRealtimeOrPrevCandle(s.time, s.timeframe)
+    );
+  })();
   const filtered = filter === "all"
     ? realtime
     : realtime.filter((s) => s.timeframe === filter);
