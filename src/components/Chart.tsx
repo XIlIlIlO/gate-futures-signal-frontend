@@ -170,7 +170,7 @@ export default function Chart({ symbol, timeframe }: Props) {
       return {
         time: formatTime(c.time),
         open: c.open, high: c.high, low: c.low, close: c.close,
-        volume: c.volume, change,
+        volume: c.contract_volume, change,
         changePercent: ref !== 0 ? (change / ref) * 100 : 0,
       };
     }
@@ -264,7 +264,7 @@ export default function Chart({ symbol, timeframe }: Props) {
         volumeSeries.setData(
           res.candles.map((c) => ({
             time: toKST(c.time),
-            value: c.volume,
+            value: c.contract_volume,
             color: c.close >= c.open ? "rgba(38,166,154,0.3)" : "rgba(239,83,80,0.3)",
           }))
         );
@@ -333,7 +333,7 @@ export default function Chart({ symbol, timeframe }: Props) {
         });
         volumeSeries.update({
           time: toKST(c.time),
-          value: c.volume,
+          value: c.contract_volume,
           color: c.close >= c.open ? "rgba(38,166,154,0.3)" : "rgba(239,83,80,0.3)",
         });
       } else if (data.event === "signal" && data.data) {
