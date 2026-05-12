@@ -13,12 +13,15 @@ interface EnrichedSignal extends Signal {
   /** ms timestamp set ONLY on genuine NEW events (added / type flip).
    * Used by SignalBadge to time-fade the NEW badge. 0 = never marked new. */
   _receivedAt: number;
+  /** ms timestamp used for list ordering. Set to the most recent WS event time
+   * for live events, or signal.time*1000 for snapshot/REST entries. Sort desc. */
+  _sortAt: number;
 }
 
 const ALL_TF = ["1m", "3m", "5m", "15m", "30m", "1h"];
 const PER_TF_LIMIT = 80;
 
-/** Keep at most 80 signals per timeframe, deduplicated by ID, sorted newest first */
+/** Keep at most 80 signals per timeframe, deduplicated by ID, sorted newest activity first */
 function capPerTimeframe(signals: EnrichedSignal[]): EnrichedSignal[] {
   const seen = new Set<string>();
   const buckets: Record<string, EnrichedSignal[]> = {};
@@ -33,7 +36,7 @@ function capPerTimeframe(signals: EnrichedSignal[]): EnrichedSignal[] {
 
   const result: EnrichedSignal[] = [];
   for (const tf of ALL_TF) result.push(...buckets[tf]);
-  result.sort((a, b) => b.time - a.time);
+  result.sort((a, b) => b._sortAt - a._sortAt);
   return result;
 }
 
@@ -42,7 +45,7 @@ function capPerTimeframe(signals: EnrichedSignal[]): EnrichedSignal[] {
  *   - If id not in prev → prepend (truly new).
  *   - If id in prev and `moveToTop` → remove old, prepend (treated as new event).
  *   - If id in prev and !moveToTop → replace in place (preserve position).
- * Then re-sort by time desc and cap.
+ * Then re-sort by _sortAt desc and cap.
  */
 function upsertSignal(
   prev: EnrichedSignal[],
@@ -61,12 +64,21 @@ function upsertSignal(
   } else {
     out = [next, ...prev];
   }
-  out.sort((a, b) => b.time - a.time);
+  out.sort((a, b) => b._sortAt - a._sortAt);
   return capPerTimeframe(out);
 }
 
 function removeSignal(prev: EnrichedSignal[], id: string): EnrichedSignal[] {
   return prev.filter((s) => s.id !== id);
+}
+
+/** Build an EnrichedSignal for a snapshot/REST entry (no live WS event). */
+function fromHistorical(s: Signal): EnrichedSignal {
+  return {
+    ...s,
+    _receivedAt: 0,           // not freshly emitted; NEW won't trigger
+    _sortAt: s.time * 1000,    // order by bar time
+  };
 }
 
 export default function SignalFeed({ onSignalClick }: Props) {
@@ -84,13 +96,9 @@ export default function SignalFeed({ onSignalClick }: Props) {
       };
 
       if (data.event === "snapshot" && Array.isArray(data.data)) {
-        // Initial snapshot: nothing is "new" — set _receivedAt=0 so NEW won't trigger.
-        const snapshotSignals = data.data.map((s) => ({
-          ...s,
-          _receivedAt: 0,
-        } as EnrichedSignal));
+        const snapshotSignals = data.data.map(fromHistorical);
         setSignals(() => {
-          snapshotSignals.sort((a, b) => b.time - a.time);
+          snapshotSignals.sort((a, b) => b._sortAt - a._sortAt);
           return capPerTimeframe(snapshotSignals);
         });
       } else if (
@@ -104,11 +112,13 @@ export default function SignalFeed({ onSignalClick }: Props) {
           const existing = prev.find((s) => s.id === incoming.id);
           const isFlip = !!existing && existing.type !== incoming.type;
           // NEW only for genuine new appearance OR type flip (BUY↔SELL).
-          // Pure score/price updates preserve previous _receivedAt and position.
+          // Pure score/price updates preserve previous _receivedAt + position.
           const isNew = isAdded || isFlip;
+          const now = Date.now();
           const enriched: EnrichedSignal = {
             ...incoming,
-            _receivedAt: isNew ? Date.now() : (existing?._receivedAt ?? 0),
+            _receivedAt: isNew ? now : (existing?._receivedAt ?? 0),
+            _sortAt: isNew ? now : (existing?._sortAt ?? incoming.time * 1000),
           };
           return upsertSignal(prev, enriched, isNew);
         });
@@ -124,10 +134,10 @@ export default function SignalFeed({ onSignalClick }: Props) {
   }, []);
 
   // Periodically sync with backend (every 30s).
-  // Preserves _receivedAt for signals we already track (so NEW timing stays
-  // tied to the original WS event, not the sync moment). Signals new to us
-  // from REST (rare — only on WS-missed events) get _receivedAt=0 so they
-  // don't suddenly flash as NEW.
+  // Preserves _receivedAt + _sortAt for signals we already track (so live
+  // NEW timing and position stay tied to the original WS event). Signals
+  // new to us from REST (rare — only on WS-missed events) get _receivedAt=0
+  // and _sortAt=bar_time so they don't flash as NEW and sort by bar time.
   useEffect(() => {
     const iv = setInterval(() => {
       Promise.all(
@@ -137,16 +147,20 @@ export default function SignalFeed({ onSignalClick }: Props) {
         results.forEach((res) => {
           res.signals.forEach((s) => incoming.push(s));
         });
-        incoming.sort((a, b) => b.time - a.time);
         setSignals((prev) => {
           const prevMap = new Map(prev.map((s) => [s.id, s]));
           const merged: EnrichedSignal[] = incoming.map((s) => {
             const existing = prevMap.get(s.id);
-            return {
-              ...s,
-              _receivedAt: existing?._receivedAt ?? 0,
-            };
+            if (existing) {
+              return {
+                ...s,
+                _receivedAt: existing._receivedAt,
+                _sortAt: existing._sortAt,
+              };
+            }
+            return fromHistorical(s);
           });
+          merged.sort((a, b) => b._sortAt - a._sortAt);
           return capPerTimeframe(merged);
         });
       }).catch(() => {});
@@ -156,8 +170,8 @@ export default function SignalFeed({ onSignalClick }: Props) {
 
   // Shared timer that drives:
   //   1) Relative time text refresh
-  //   2) NEW badge expiration check (10s after _receivedAt)
-  // Fired every 2s so NEW disappears within ±2s of its 10s window.
+  //   2) NEW badge expiration check (20s after _receivedAt)
+  // Fired every 2s so NEW disappears within ±2s of its 20s window.
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const iv = setInterval(() => setTick((t) => t + 1), 2_000);
