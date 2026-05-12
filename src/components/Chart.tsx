@@ -270,7 +270,7 @@ export default function Chart({ symbol, timeframe }: Props) {
         );
 
         if (res.signals.length > 0) {
-          addSignals(res.signals);
+          setSignalsSnapshot(res.signals);
         }
 
         // Show latest candle info by default
@@ -284,7 +284,7 @@ export default function Chart({ symbol, timeframe }: Props) {
       })
       .catch(console.error);
 
-    // Signal marker state — deduplicate by signal ID
+    // Signal marker state — keyed by signal ID (one per bar)
     const signalMap = new Map<string, Signal>();
 
     function syncMarkers() {
@@ -292,15 +292,23 @@ export default function Chart({ symbol, timeframe }: Props) {
       markersPlugin.setMarkers(markers);
     }
 
-    function addSignals(signals: Signal[]) {
-      let changed = false;
-      for (const s of signals) {
-        if (!signalMap.has(s.id)) {
-          signalMap.set(s.id, s);
-          changed = true;
-        }
-      }
-      if (changed) syncMarkers();
+    /** Replace mode for snapshot — clears any in-bar flips that disappeared */
+    function setSignalsSnapshot(signals: Signal[]) {
+      signalMap.clear();
+      for (const s of signals) signalMap.set(s.id, s);
+      syncMarkers();
+    }
+
+    /** Upsert (added or type-flipped within a bar) */
+    function upsertSignal(s: Signal) {
+      const prev = signalMap.get(s.id);
+      if (prev && prev.type === s.type && prev.score === s.score && prev.price === s.price) return;
+      signalMap.set(s.id, s);
+      syncMarkers();
+    }
+
+    function removeSignal(id: string) {
+      if (signalMap.delete(id)) syncMarkers();
     }
 
     // Connect WebSocket for real-time updates
@@ -309,17 +317,20 @@ export default function Chart({ symbol, timeframe }: Props) {
 
       const data = msg as {
         event: string;
-        data?: Candle;
+        data?: Candle | Signal;
         candles?: Candle[];
         signals?: Signal[];
+        id?: string;
+        symbol?: string;
+        timeframe?: string;
       };
 
       if (data.event === "snapshot") {
-        if (data.signals && data.signals.length > 0) {
-          addSignals(data.signals);
+        if (data.signals) {
+          setSignalsSnapshot(data.signals);
         }
       } else if (data.event === "candle_update" && data.data) {
-        const c = data.data;
+        const c = data.data as Candle;
         const kst = c.time + KST_OFFSET;
         const isNew = !candleMap.has(kst);
         candleMap.set(kst, c);
@@ -336,8 +347,10 @@ export default function Chart({ symbol, timeframe }: Props) {
           value: c.contract_volume,
           color: c.close >= c.open ? "rgba(38,166,154,0.3)" : "rgba(239,83,80,0.3)",
         });
-      } else if (data.event === "signal" && data.data) {
-        addSignals([data.data as unknown as Signal]);
+      } else if (data.event === "signal_upsert" && data.data) {
+        upsertSignal(data.data as Signal);
+      } else if (data.event === "signal_remove" && typeof data.id === "string") {
+        removeSignal(data.id);
       }
     });
     wsRef.current = ws;

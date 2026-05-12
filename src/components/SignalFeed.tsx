@@ -10,12 +10,9 @@ interface Props {
 }
 
 interface EnrichedSignal extends Signal {
+  /** ms timestamp set ONLY on genuine NEW events (added / type flip).
+   * Used by SignalBadge to time-fade the NEW badge. 0 = never marked new. */
   _receivedAt: number;
-  _isLive: boolean;
-}
-
-function enrichSignal(sig: Signal, isLive: boolean): EnrichedSignal {
-  return { ...sig, _receivedAt: Date.now(), _isLive: isLive };
 }
 
 const ALL_TF = ["1m", "3m", "5m", "15m", "30m", "1h"];
@@ -40,6 +37,38 @@ function capPerTimeframe(signals: EnrichedSignal[]): EnrichedSignal[] {
   return result;
 }
 
+/**
+ * Upsert by id:
+ *   - If id not in prev → prepend (truly new).
+ *   - If id in prev and `moveToTop` → remove old, prepend (treated as new event).
+ *   - If id in prev and !moveToTop → replace in place (preserve position).
+ * Then re-sort by time desc and cap.
+ */
+function upsertSignal(
+  prev: EnrichedSignal[],
+  next: EnrichedSignal,
+  moveToTop: boolean,
+): EnrichedSignal[] {
+  const idx = prev.findIndex((s) => s.id === next.id);
+  let out: EnrichedSignal[];
+  if (idx >= 0) {
+    if (moveToTop) {
+      out = [next, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
+    } else {
+      out = prev.slice();
+      out[idx] = next;
+    }
+  } else {
+    out = [next, ...prev];
+  }
+  out.sort((a, b) => b.time - a.time);
+  return capPerTimeframe(out);
+}
+
+function removeSignal(prev: EnrichedSignal[], id: string): EnrichedSignal[] {
+  return prev.filter((s) => s.id !== id);
+}
+
 export default function SignalFeed({ onSignalClick }: Props) {
   const [signals, setSignals] = useState<EnrichedSignal[]>([]);
   const [filter, setFilter] = useState<Timeframe | "all">("all");
@@ -47,24 +76,45 @@ export default function SignalFeed({ onSignalClick }: Props) {
 
   useEffect(() => {
     wsRef.current = connectSignalsWs((msg: unknown) => {
-      const data = msg as { event: string; data: Signal | Signal[] };
+      const data = msg as {
+        event: string;
+        data?: Signal | Signal[];
+        id?: string;
+        status?: "added" | "updated";
+      };
 
       if (data.event === "snapshot" && Array.isArray(data.data)) {
-        const snapshotSignals = data.data.map((s) => enrichSignal(s, false));
-
-        // Replace with snapshot (not merge) so deleted signals disappear
+        // Initial snapshot: nothing is "new" — set _receivedAt=0 so NEW won't trigger.
+        const snapshotSignals = data.data.map((s) => ({
+          ...s,
+          _receivedAt: 0,
+        } as EnrichedSignal));
         setSignals(() => {
           snapshotSignals.sort((a, b) => b.time - a.time);
           return capPerTimeframe(snapshotSignals);
         });
-      } else if (data.event === "signal" && data.data && !Array.isArray(data.data)) {
-        const live = enrichSignal(data.data, true);
+      } else if (
+        data.event === "signal_upsert" &&
+        data.data &&
+        !Array.isArray(data.data)
+      ) {
+        const incoming = data.data as Signal;
+        const isAdded = data.status === "added";
         setSignals((prev) => {
-          if (prev.some((s) => s.id === live.id)) return prev;
-          const updated = [live, ...prev];
-          updated.sort((a, b) => b.time - a.time);
-          return capPerTimeframe(updated);
+          const existing = prev.find((s) => s.id === incoming.id);
+          const isFlip = !!existing && existing.type !== incoming.type;
+          // NEW only for genuine new appearance OR type flip (BUY↔SELL).
+          // Pure score/price updates preserve previous _receivedAt and position.
+          const isNew = isAdded || isFlip;
+          const enriched: EnrichedSignal = {
+            ...incoming,
+            _receivedAt: isNew ? Date.now() : (existing?._receivedAt ?? 0),
+          };
+          return upsertSignal(prev, enriched, isNew);
         });
+      } else if (data.event === "signal_remove" && typeof data.id === "string") {
+        const rid = data.id;
+        setSignals((prev) => removeSignal(prev, rid));
       }
     });
     return () => {
@@ -73,32 +123,47 @@ export default function SignalFeed({ onSignalClick }: Props) {
     };
   }, []);
 
-  // Periodically sync with backend to remove deleted signals
+  // Periodically sync with backend (every 30s).
+  // Preserves _receivedAt for signals we already track (so NEW timing stays
+  // tied to the original WS event, not the sync moment). Signals new to us
+  // from REST (rare — only on WS-missed events) get _receivedAt=0 so they
+  // don't suddenly flash as NEW.
   useEffect(() => {
     const iv = setInterval(() => {
       Promise.all(
         ALL_TF.map((tf) => fetchRecentSignals(tf, 400))
       ).then((results) => {
-        const all: EnrichedSignal[] = [];
+        const incoming: Signal[] = [];
         results.forEach((res) => {
-          res.signals.forEach((s) => all.push(enrichSignal(s, false)));
+          res.signals.forEach((s) => incoming.push(s));
         });
-        all.sort((a, b) => b.time - a.time);
-        setSignals(capPerTimeframe(all));
+        incoming.sort((a, b) => b.time - a.time);
+        setSignals((prev) => {
+          const prevMap = new Map(prev.map((s) => [s.id, s]));
+          const merged: EnrichedSignal[] = incoming.map((s) => {
+            const existing = prevMap.get(s.id);
+            return {
+              ...s,
+              _receivedAt: existing?._receivedAt ?? 0,
+            };
+          });
+          return capPerTimeframe(merged);
+        });
       }).catch(() => {});
     }, 30_000);
     return () => clearInterval(iv);
   }, []);
 
-  // Single shared timer for relative time updates (instead of per-badge)
+  // Shared timer that drives:
+  //   1) Relative time text refresh
+  //   2) NEW badge expiration check (10s after _receivedAt)
+  // Fired every 2s so NEW disappears within ±2s of its 10s window.
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    const iv = setInterval(() => setTick((t) => t + 1), 30_000);
+    const iv = setInterval(() => setTick((t) => t + 1), 2_000);
     return () => clearInterval(iv);
   }, []);
 
-  // Per-timeframe: if current bucket has signals → show current only
-  // If current bucket is empty → fallback to include previous bucket (no gap on transition)
   const realtime = (() => {
     const hasCurrentBucket = new Set<string>();
     for (const s of signals) {

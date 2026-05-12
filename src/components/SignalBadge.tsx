@@ -46,7 +46,6 @@ export function isRealtimeOrPrevCandle(signalTime: number, timeframe: string): b
 
 interface EnrichedSignal extends Signal {
   _receivedAt?: number;
-  _isLive?: boolean;
 }
 
 interface Props {
@@ -56,10 +55,18 @@ interface Props {
   tick?: number; // passed from parent to trigger re-render
 }
 
+/** NEW badge stays visible for this many ms after a genuine new event
+ * (added or type flip). After expiry, the signal stays in the list but
+ * without the NEW pulse. */
+const NEW_DURATION_MS = 20_000;
+
 function SignalBadge({ signal, onClick, compact }: Props) {
   const isBuy = signal.type === "BUY";
   const isRealtime = isRealtimeCandle(signal.time, signal.timeframe);
-  const isNew = signal._isLive && isRealtime;
+  const receivedAt = signal._receivedAt ?? 0;
+  const isNew = receivedAt > 0
+    && (Date.now() - receivedAt) < NEW_DURATION_MS
+    && isRealtime;
   const isFaded = !isRealtime;
 
   return (
