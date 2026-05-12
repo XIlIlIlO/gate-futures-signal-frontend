@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Signal, Timeframe } from "./api/types";
 import SignalFeed from "./components/SignalFeed";
 import SymbolList from "./components/SymbolList";
@@ -6,11 +6,32 @@ import Chart from "./components/Chart";
 import TimeframeSelector from "./components/TimeframeSelector";
 import StatusBar from "./components/StatusBar";
 
+type Theme = "dark" | "light";
+
+const THEME_STORAGE_KEY = "superhero-theme";
+
+function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "dark";
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "dark" || stored === "light") return stored;
+  return "dark";
+}
+
 export default function App() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [chartTimeframe, setChartTimeframe] = useState<Timeframe>("1m");
   const [showSymbolList, setShowSymbolList] = useState(false);
   const [mobileTab, setMobileTab] = useState<"signals" | "chart">("signals");
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch { /* ignore quota / private mode errors */ }
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
   const handleSignalClick = (signal: Signal) => {
     setSelectedSymbol(signal.symbol);
@@ -31,7 +52,17 @@ export default function App() {
           <h1>SUPERHERO Signal Alerts</h1>
           <span className="header-subtitle">Gate.io USDT Futures</span>
         </div>
-        <StatusBar />
+        <div className="header-right">
+          <StatusBar />
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            aria-label="테마 전환"
+            title={theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+        </div>
       </header>
 
       {/* Mobile tab bar */}
@@ -79,7 +110,7 @@ export default function App() {
           )}
 
           {selectedSymbol ? (
-            <Chart symbol={selectedSymbol} timeframe={chartTimeframe} />
+            <Chart symbol={selectedSymbol} timeframe={chartTimeframe} theme={theme} />
           ) : (
             <div className="chart-placeholder">
               <div className="placeholder-content">

@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SUPERHERO Signal Alerts</title>
+    <script>
+      // Apply saved theme before React mounts to avoid flash-of-wrong-theme.
+      (function () {
+        try {
+          var t = localStorage.getItem("superhero-theme");
+          document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

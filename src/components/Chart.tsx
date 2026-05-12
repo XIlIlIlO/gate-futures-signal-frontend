@@ -17,7 +17,23 @@ import { connectCandlesWs, type ManagedWs } from "../api/ws";
 interface Props {
   symbol: string;
   timeframe: Timeframe;
+  theme?: "dark" | "light";
 }
+
+const CHART_COLORS = {
+  dark: {
+    background: "#131722",
+    text: "#d1d4dc",
+    grid: "#1e222d",
+    border: "#2a2e39",
+  },
+  light: {
+    background: "#ffffff",
+    text: "#1a1a1a",
+    grid: "#eaecef",
+    border: "#d0d2d6",
+  },
+} as const;
 
 interface OhlcvInfo {
   time: string;
@@ -114,7 +130,7 @@ function OhlcvLegend({ info, precision }: { info: OhlcvInfo | null; precision: n
   );
 }
 
-export default function Chart({ symbol, timeframe }: Props) {
+export default function Chart({ symbol, timeframe, theme = "dark" }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const wsRef = useRef<ManagedWs | null>(null);
@@ -175,19 +191,20 @@ export default function Chart({ symbol, timeframe }: Props) {
       };
     }
 
+    const palette = CHART_COLORS[theme];
     const chart = createChart(el, {
       layout: {
-        background: { type: ColorType.Solid, color: "#131722" },
-        textColor: "#d1d4dc",
+        background: { type: ColorType.Solid, color: palette.background },
+        textColor: palette.text,
       },
       grid: {
-        vertLines: { color: "#1e222d" },
-        horzLines: { color: "#1e222d" },
+        vertLines: { color: palette.grid },
+        horzLines: { color: palette.grid },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "#2a2e39" },
+      rightPriceScale: { borderColor: palette.border },
       timeScale: {
-        borderColor: "#2a2e39",
+        borderColor: palette.border,
         timeVisible: true,
         secondsVisible: false,
       },
@@ -362,7 +379,7 @@ export default function Chart({ symbol, timeframe }: Props) {
       chart.remove();
       chartRef.current = null;
     };
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, theme]);
 
   return (
     <div className="chart-wrapper">
