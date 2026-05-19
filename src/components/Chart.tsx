@@ -297,7 +297,15 @@ export default function Chart({ symbol, timeframe, theme = "dark" }: Props) {
           if (last) setOhlcv(makeOhlcv(last, lastKey));
         }
 
-        chart.timeScale().fitContent();
+        // 최근 80개 봉이 보이도록 확대 (fitContent는 전체 표시라 너무 축소됨)
+        const total = res.candles.length;
+        if (total > 0) {
+          const visible = Math.min(80, total);
+          chart.timeScale().setVisibleLogicalRange({
+            from: total - visible,
+            to: total + 3,
+          });
+        }
       })
       .catch(console.error);
 
