@@ -28,10 +28,6 @@ export function isRealtimeCandle(signalTime: number, timeframe: string): boolean
   const now = Math.floor(Date.now() / 1000);
   const currentBucketStart = Math.floor(now / period) * period;
   const signalBucket = Math.floor(signalTime / period) * period;
-
-  if (timeframe === "1m") {
-    return signalBucket >= currentBucketStart - period;
-  }
   return signalBucket === currentBucketStart;
 }
 
@@ -86,7 +82,6 @@ function SignalBadge({ signal, onClick, compact }: Props) {
       <div className="signal-badge-body">
         <span className="signal-symbol">{signal.symbol.replace("_", "/")}</span>
         <span className="signal-tf">{signal.timeframe}</span>
-        <span className="signal-score">스코어 {signal.score}</span>
         <span className="signal-price">${signal.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
       </div>
       {!compact && (

@@ -184,6 +184,169 @@ body {
   background: var(--red);
 }
 
+/* ── Feed Controls (target + sort) ── */
+.feed-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 4px;
+}
+
+.target-selector,
+.sort-selector {
+  display: flex;
+  gap: 4px;
+}
+
+.target-btn,
+.sort-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.target-btn:hover:not(:disabled),
+.sort-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.target-btn.active,
+.sort-btn.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sort-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Rank Slot / Rank Row ── */
+.rank-slot,
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.rank-slot.active {
+  background: transparent;
+}
+
+.rank-slot.empty {
+  background: var(--bg-tertiary);
+}
+
+.rank-slot.empty.clickable {
+  cursor: pointer;
+}
+
+.rank-slot.empty.clickable:hover {
+  background: var(--bg-hover);
+}
+
+.rank-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-family: "SF Mono", "Fira Code", monospace;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.rank-slot.active .rank-num,
+.rank-row .rank-num {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.rank-signal-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.rank-signal-wrap .signal-badge {
+  border: none;
+  padding: 4px 6px;
+}
+
+.rank-row {
+  padding: 4px 6px;
+  border: none;
+}
+
+/* 흐림 슬롯: 텍스트만 흐리게 처리 (slot 자체 opacity 적용 안 함) — metric은 그대로 또렷하게 */
+.rank-empty-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rank-symbol {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.rank-slot.not-listed .rank-symbol {
+  color: var(--text-muted);
+}
+
+.rank-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.rank-status {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+/* metric은 active/empty 무관하게 또렷하게 — 사용자가 변동성/거래대금 값을 보고 싶어함 */
+.rank-metric {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: "SF Mono", "Fira Code", monospace;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.rank-slot.active .rank-metric,
+.rank-row .rank-metric {
+  color: var(--accent);
+}
+
 /* ── Timeframe Selector ── */
 .tf-selector {
   display: flex;

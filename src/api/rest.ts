@@ -1,6 +1,8 @@
 import { API_BASE } from "./config";
 import type {
   CandlesResponse,
+  MarketCapRankingResponse,
+  MetricRankingResponse,
   SignalsResponse,
   SymbolsResponse,
   StatusResponse,
@@ -53,4 +55,22 @@ export function fetchSignalsBySymbol(
   return get(
     `/api/signals/by-symbol?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=${limit}`
   );
+}
+
+export function fetchMarketCapRanking(limit = 100): Promise<MarketCapRankingResponse> {
+  return get(`/api/rankings/market-cap?limit=${limit}`);
+}
+
+export function fetchVolatilityRanking(
+  timeframe: Timeframe,
+  limit = 100,
+): Promise<MetricRankingResponse> {
+  return get(`/api/rankings/volatility?timeframe=${timeframe}&limit=${limit}`);
+}
+
+export function fetchTurnoverRanking(
+  timeframe: Timeframe,
+  limit = 100,
+): Promise<MetricRankingResponse> {
+  return get(`/api/rankings/turnover?timeframe=${timeframe}&limit=${limit}`);
 }

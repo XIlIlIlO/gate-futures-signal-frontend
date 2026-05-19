@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Signal, Timeframe } from "./api/types";
+import type { SortMode, Target, Timeframe } from "./api/types";
 import SignalFeed from "./components/SignalFeed";
 import SymbolList from "./components/SymbolList";
 import Chart from "./components/Chart";
@@ -9,6 +9,8 @@ import StatusBar from "./components/StatusBar";
 type Theme = "dark" | "light";
 
 const THEME_STORAGE_KEY = "superhero-theme";
+const TARGET_STORAGE_KEY = "superhero-target";
+const SORT_STORAGE_KEY = "superhero-sort";
 
 function getInitialTheme(): Theme {
   if (typeof window === "undefined") return "dark";
@@ -17,12 +19,28 @@ function getInitialTheme(): Theme {
   return "dark";
 }
 
+function getInitialTarget(): Target {
+  if (typeof window === "undefined") return "all";
+  const v = window.localStorage.getItem(TARGET_STORAGE_KEY);
+  if (v === "all" || v === "market_cap" || v === "volatility" || v === "turnover") return v;
+  return "all";
+}
+
+function getInitialSortMode(): SortMode {
+  if (typeof window === "undefined") return "latest";
+  const v = window.localStorage.getItem(SORT_STORAGE_KEY);
+  if (v === "latest" || v === "rank") return v;
+  return "latest";
+}
+
 export default function App() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [chartTimeframe, setChartTimeframe] = useState<Timeframe>("1m");
   const [showSymbolList, setShowSymbolList] = useState(false);
   const [mobileTab, setMobileTab] = useState<"signals" | "chart">("signals");
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [target, setTarget] = useState<Target>(getInitialTarget);
+  const [sortMode, setSortMode] = useState<SortMode>(getInitialSortMode);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -31,11 +49,24 @@ export default function App() {
     } catch { /* ignore quota / private mode errors */ }
   }, [theme]);
 
+  useEffect(() => {
+    try { window.localStorage.setItem(TARGET_STORAGE_KEY, target); } catch { /* ignore */ }
+  }, [target]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(SORT_STORAGE_KEY, sortMode); } catch { /* ignore */ }
+  }, [sortMode]);
+
+  // 순위순은 대상=전체일 땐 불가능. 자동 fallback.
+  useEffect(() => {
+    if (target === "all" && sortMode === "rank") setSortMode("latest");
+  }, [target, sortMode]);
+
   const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
-  const handleSignalClick = (signal: Signal) => {
-    setSelectedSymbol(signal.symbol);
-    setChartTimeframe(signal.timeframe as Timeframe);
+  const handleJump = (symbol: string, timeframe: Timeframe) => {
+    setSelectedSymbol(symbol);
+    setChartTimeframe(timeframe);
     setMobileTab("chart");
   };
 
@@ -84,7 +115,13 @@ export default function App() {
       <main className="app-main">
         {/* Left: Signal Feed */}
         <aside className={`panel-left ${mobileTab === "signals" ? "mobile-show" : "mobile-hide"}`}>
-          <SignalFeed onSignalClick={handleSignalClick} />
+          <SignalFeed
+            onJump={handleJump}
+            target={target}
+            sortMode={sortMode}
+            onTargetChange={setTarget}
+            onSortModeChange={setSortMode}
+          />
         </aside>
 
         {/* Center: Chart */}

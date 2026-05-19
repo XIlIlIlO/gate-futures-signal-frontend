@@ -54,3 +54,37 @@ export interface StatusResponse {
 }
 
 export type Timeframe = "1m" | "3m" | "5m" | "15m" | "30m" | "1h";
+
+// ── Rankings ──────────────────────────────────────────────────────
+
+export type RankingKind = "market_cap" | "volatility" | "turnover";
+export type Target = "all" | "market_cap" | "volatility" | "turnover";
+export type SortMode = "latest" | "rank";
+
+export interface MarketCapRankItem {
+  rank: number;
+  cmc_symbol: string;
+  name: string;
+  market_cap: number;
+  gate_symbol: string | null;
+  gate_listed: boolean;
+}
+
+export interface MetricRankItem {
+  rank: number;
+  symbol: string;
+  value: number;
+}
+
+export interface MarketCapRankingResponse {
+  kind: "market_cap";
+  count: number;
+  items: MarketCapRankItem[];
+}
+
+export interface MetricRankingResponse {
+  kind: "volatility" | "turnover";
+  timeframe: string;
+  count: number;
+  items: MetricRankItem[];
+}
