@@ -1,4 +1,4 @@
-import { API_BASE } from "./config";
+import { ensureHealthyBackend, getApiBase } from "./config";
 import type {
   CandlesResponse,
   MarketCapRankingResponse,
@@ -10,9 +10,19 @@ import type {
 } from "./types";
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
-  return res.json();
+  try {
+    const res = await fetch(`${getApiBase()}${path}`);
+    if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+    return res.json();
+  } catch (err) {
+    // Network error (TypeError) likely means backend is unreachable.
+    // HTTP 4xx/5xx threw a custom Error above — don't failover on those.
+    if (!(err instanceof TypeError)) throw err;
+    await ensureHealthyBackend();
+    const res = await fetch(`${getApiBase()}${path}`);
+    if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+    return res.json();
+  }
 }
 
 export function fetchSymbols(): Promise<SymbolsResponse> {

@@ -1,9 +1,11 @@
-import { WS_BASE } from "./config";
+import { ensureHealthyBackend, getWsBase } from "./config";
 
 type MessageHandler = (data: unknown) => void;
 
 /**
- * Managed WebSocket connection with auto-reconnect.
+ * Managed WebSocket connection with auto-reconnect + failover.
+ * After 2 consecutive failures, runs a health check that may switch
+ * the active backend, then reconnects against the (possibly new) base.
  * Call .close() to permanently stop (no more reconnects).
  */
 export interface ManagedWs {
@@ -15,15 +17,20 @@ export function connectSignalsWs(onMessage: MessageHandler): ManagedWs {
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
+  let consecutiveFailures = 0;
 
-  function connect() {
+  async function connect() {
     if (stopped) return;
 
-    ws = new WebSocket(`${WS_BASE}/ws/signals`);
+    if (consecutiveFailures >= 2) {
+      await ensureHealthyBackend();
+    }
+
+    ws = new WebSocket(`${getWsBase()}/ws/signals`);
 
     ws.onopen = () => {
       console.log("[WS] signals connected");
-      // Keep-alive ping every 30s to prevent Railway/proxy timeouts
+      consecutiveFailures = 0;
       pingTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send("ping");
@@ -40,9 +47,13 @@ export function connectSignalsWs(onMessage: MessageHandler): ManagedWs {
     ws.onclose = () => {
       console.log("[WS] signals closed");
       cleanup();
+      consecutiveFailures += 1;
       if (!stopped) {
-        console.log("[WS] signals reconnecting in 3s...");
-        reconnectTimer = setTimeout(connect, 3000);
+        const delay = consecutiveFailures >= 2 ? 1500 : 3000;
+        if (consecutiveFailures >= 2) {
+          console.log("[WS] signals — checking backend health before reconnect");
+        }
+        reconnectTimer = setTimeout(connect, delay);
       }
     };
 
@@ -69,7 +80,7 @@ export function connectSignalsWs(onMessage: MessageHandler): ManagedWs {
         reconnectTimer = null;
       }
       if (ws) {
-        ws.onclose = null; // prevent reconnect trigger
+        ws.onclose = null;
         ws.close();
         ws = null;
       }
@@ -86,16 +97,22 @@ export function connectCandlesWs(
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
+  let consecutiveFailures = 0;
 
-  function connect() {
+  async function connect() {
     if (stopped) return;
 
+    if (consecutiveFailures >= 2) {
+      await ensureHealthyBackend();
+    }
+
     ws = new WebSocket(
-      `${WS_BASE}/ws/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`
+      `${getWsBase()}/ws/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`
     );
 
     ws.onopen = () => {
       console.log(`[WS] candles ${symbol} ${timeframe} connected`);
+      consecutiveFailures = 0;
       pingTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send("ping");
@@ -112,8 +129,10 @@ export function connectCandlesWs(
     ws.onclose = () => {
       console.log(`[WS] candles ${symbol} closed`);
       cleanup();
+      consecutiveFailures += 1;
       if (!stopped) {
-        reconnectTimer = setTimeout(connect, 3000);
+        const delay = consecutiveFailures >= 2 ? 1500 : 3000;
+        reconnectTimer = setTimeout(connect, delay);
       }
     };
 
